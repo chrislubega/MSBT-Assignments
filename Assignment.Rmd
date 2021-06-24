@@ -1,0 +1,180 @@
+---
+title: "MSB7102 Mini-project, Semester I, 2021"
+author: "Christopher Lubega 2020/HD07/22162U "
+output: html_document
+---
+
+
+```{r  global, warning=FALSE, include=F, echo = T ,message= FALSE}
+library(readr)
+library(tidyverse)
+library(table1)
+library(readr)
+library(readxl)
+library(phyloseq)
+library(DESeq2)
+info <- read.delim("diabimmune_16s_t1d_metadata.csv")
+# Change structure of discreet variables to factors 
+info$Gender <- as.factor(info$Gender)  
+info$Case_Control <- as.factor(info$Case_Control)
+info$Delivery_Route <- as.factor(info$Delivery_Route)
+```
+
+
+# Results 
+A total of 777 participants were recruited for the study, of whom most (53.0%) were female. Mean age at the point of sample collection was 483 days (sd=295), approximately 1 year and 4 months. Majority of the participants ( 91.5%) had vaginal birth while the rest (8.5%) were born through cesarean section. 
+260 participants (33.4%) developed diabetes, of whom most (54.6%) were female, and were all (100%) born through vaginal birth.
+
+Table 1: Clinical and demographic characteristics of study participants 
+```{r include=T, warning=FALSE, echo = T } 
+
+# Compute p-values for significance of association between each of the other variables and disease status 
+pvalue <- function(x, ...) {
+  y <- unlist(x)
+  if (is.numeric(y)) {
+    p <- t.test(info$Age_at_Collection~info$Case_Control)$p.value
+  } else if(y[1]=="female"){
+    p <- fisher.test(info$Case_Control, info$Gender)$p.value
+  }else
+    p <- fisher.test(info$Case_Control, info$Delivery_Route)$p.value
+  c("", sub("<", "&lt;", format.pval(p, digits=4, eps=0.05)))
+}
+# Tabulate summary statistics by disease status
+
+table1(~ Gender + Delivery_Route + Age_at_Collection | Case_Control, data= info, extra.col=list(`P-value`=pvalue))
+```
+
+
+### Graphical Representations
+```{r include=T, warning=FALSE, echo=T} 
+boxplot(info$Age_at_Collection~ info$Case_Control, main="Boxplot for Age at Collection by Disease Status", xlab="Disease Status", 
+        ylab="Age")
+
+ggplot(info, aes(x =Case_Control ,y= (..count..)/sum(..count..), fill= Gender)) + 
+  geom_bar(position = "dodge", color= "Black")+
+  scale_y_continuous(labels=scales::percent)+ 
+  labs(title = "Distribution of Disease Status by Gender",
+       y= "Percentage", x= "Disease Status" )+
+  geom_text(stat= "count", aes(label= scales::percent((..count..)/sum(..count..))), position = position_dodge(0.9), size=4, vjust=-0.1)+
+  theme_classic()+
+  scale_fill_manual(name = "", values = c("White", "grey"))
+
+ggplot(info, aes(x =Case_Control ,y= (..count..)/sum(..count..), fill= Delivery_Route)) + 
+  geom_bar(position = "dodge", color= "Black")+
+  scale_y_continuous(labels=scales::percent)+ 
+  labs(title = "Distribution of Disease Status by Delivery Route",
+       y= "Percentage", x= "Disease Status" )+
+  geom_text(stat= "count", aes(label= scales::percent((..count..)/sum(..count..))), position = position_dodge(0.9), size=4, vjust=-0.1)+
+  theme_classic()+
+  scale_fill_manual(name = "", values = c("White", "grey"))
+
+
+ggplot(info, aes(x =Delivery_Route ,y= (..count..)/sum(..count..), fill= Gender)) + 
+  geom_bar(position = "dodge",color= "Black")+
+  scale_y_continuous(labels=scales::percent)+ 
+  labs(title = "Distribution of Participants by Delivery route and Sex",
+       y= "Percentage", x= "Delivery Route")+
+  geom_text(stat= "count", aes(label= scales::percent((..count..)/sum(..count..))), position = position_dodge(0.9), size=4, vjust=-0.1)+
+  theme_classic()+
+  scale_fill_manual(name = "", values = c("White", "grey")) 
+
+```
+
+
+
+A t-test showed no significant association between disease status and age at sample collection (p= 0.308). Similarly a Fishers' exact test revealed no association between sex and disease status (p= 0.58), however, the same test showed significant association between disease status and delivery route (p<0.05). 
+
+Despite the results above, all the variables were included in a logistic regression model to test for independent association of each if the variables with disease status. Below is output from the model.As expected, none of the variables was independently associated with disease status. 
+```{r include=T, warning=FALSE, echo=T}
+#Test for Independent Association
+model = glm(info$Case_Control ~ info$Gender + info$Delivery_Route + info$Age_at_Collection,  family=binomial)
+summary(model)
+```
+
+
+## Alpha Diversity and Ordination Plots
+Data was analyzed for diversity using the phyloseq package. 
+```{r include=T, warning=FALSE, echo=T, message=FALSE}
+#Import data to create Phyloseq Object
+sampledata <- info
+Taxonomy <- read_excel("Taxonomy.xlsx")
+OTU <- read_excel("OTU.xlsx")
+
+#Required to have similar row names in OTU and taxonomy table
+Taxonomy <- column_to_rownames(Taxonomy, var = "OTUID")
+OTU <- column_to_rownames(OTU, var = "OTUID")
+sampledata <- column_to_rownames(sampledata, var = "Sample_ID")
+
+# Change OTU and taxonomy dataframes to matrices
+OTUmat <- as.matrix(OTU)
+taxmat <- as.matrix(Taxonomy)
+
+# create phyloseq object
+OTUtable <-  otu_table(OTUmat, taxa_are_rows = TRUE)
+Taxonomytable <-  tax_table(taxmat)
+sampledata1 <-  sample_data(sampledata)
+phseq = phyloseq(OTUtable, Taxonomytable, sampledata1)
+phseq
+
+```
+
+ 
+### Alpha- Diversity
+
+From the plots below, there is a significant relationship between abundance and age whereby abundance increases with age at sample collection of the participant. Additionally, participants who had vaginal delivery have higher diversity compared to those born through cesa
+```{r include=T, warning=FALSE, echo=T, message=FALSE}
+## Figure 4: Ordination and Alpha- Diversity plots 
+plot_richness(phseq,x = "Case_Control", color="Delivery_Route", measures= "Chao1")+ theme_classic()
+
+plot_richness(phseq,x = "Gender", color="Case_Control", measures= c("Chao1", "shannon"))+ theme_classic()
+
+plot_richness(phseq,x = "Age_at_Collection", color="Case_Control", measures= "Chao1")+ theme_classic()
+
+plot_richness(phseq,x = "Delivery_Route", color="Case_Control", measures= "Chao1")+ theme_classic()
+```
+
+### Ordination Plots 
+
+From the plots below, there are no significant patterns by gender, disease status, or delivery route. Firmicutes were the most abundant phylum of organisms present in the samples. 
+```{r include=T, warning=FALSE, echo=T, message=FALSE}
+ordinate(phseq, "PCoA", "bray")%>%
+plot_ordination(phseq, .,color = "Gender", title = "Diversity of samples by Gender")+ 
+  theme_classic()
+
+ordinate(phseq, "PCoA", "bray")%>%
+plot_ordination(phseq, .,color = "Case_Control", title = "Diversity of samples by Disease Status")+ 
+  theme_classic()
+
+ordinate(phseq, "PCoA", "bray")%>%
+plot_ordination(phseq, .,color = "Delivery_Route", title = "Diversity of samples by Disease Status")+ 
+  theme_classic()
+
+ordinate(phseq, "PCoA", "bray")%>%
+  plot_ordination(phseq, .,type="taxa", color="Phylum", title = "Diversity of samples by Phylum")+ 
+  theme_classic()
+
+```
+
+## Differential Abundance Analysis
+Of the 2240 OTU's, 60% were deferentially abundant between cases and controls. 37% were deferentially abundant upwards while 23% were deferentially abundant downwards. Following is a summary of the results, top 10 OTU's with the least adjusted p-values, and a plot showing differentialy abundant OTUs 
+
+```{r include=T, echo=T, message=FALSE}
+
+OTUmat1 <- OTUmat+1
+OTU1 = otu_table(OTUmat1, taxa_are_rows = TRUE)
+phseq1 = phyloseq(OTU1, Taxonomytable, sampledata1)
+ds <- phyloseq_to_deseq2(phseq1, ~ Case_Control)
+dds <- DESeq(ds)
+res <- results(dds, alpha = 0.05)
+deseq.results <- as.data.frame(res)
+
+summary(res)
+deseq.results[c(1:10), c(1,2,6)]
+plotMA(dds)
+
+```
+
+
+
+
+
